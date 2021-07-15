@@ -256,6 +256,9 @@ PaError PaOSS_Initialize( PaUtilHostApiRepresentation **hostApi, PaHostApiIndex 
     (*hostApi)->Terminate = Terminate;
     (*hostApi)->OpenStream = OpenStream;
     (*hostApi)->IsFormatSupported = IsFormatSupported;
+    (*hostApi)->ScanDeviceInfos = NULL;
+    (*hostApi)->CommitDeviceInfos = NULL;
+    (*hostApi)->DisposeDeviceInfos = NULL;
 
     PA_ENSURE( BuildDeviceList( ossHostApi ) );
 

@@ -121,6 +121,7 @@ IF(WIN32)
 
   SET(PA_PLATFORM_SOURCES
     src/os/win/pa_win_hostapis.c
+    src/os/win/pa_win_hotplug.c
     src/os/win/pa_win_util.c
     src/os/win/pa_win_waveformat.c
     src/os/win/pa_win_wdmks_utils.c
@@ -252,6 +253,7 @@ ELSE()
     IF(PA_USE_COREAUDIO)
       SET(PA_COREAUDIO_SOURCES
         src/hostapi/coreaudio/pa_mac_core.c
+        src/hostapi/coreaudio/pa_mac_core_hotplug.c
         src/hostapi/coreaudio/pa_mac_core_blocking.c
         src/hostapi/coreaudio/pa_mac_core_utilities.c)
       SET(PA_COREAUDIO_INCLUDES
@@ -301,7 +303,9 @@ ELSE()
     ENDIF()
     IF(PA_USE_ALSA)
       SET(PA_PRIVATE_INCLUDE_PATHS ${PA_PRIVATE_INCLUDE_PATHS} ${ALSA_INCLUDE_DIRS})
-      SET(PA_ALSA_SOURCES src/hostapi/alsa/pa_linux_alsa.c)
+      SET(PA_ALSA_SOURCES
+        src/hostapi/alsa/pa_linux_alsa.c
+        src/hostapi/alsa/pa_linux_alsa_hotplug.c)
       SOURCE_GROUP("hostapi\\ALSA" FILES ${PA_ALSA_SOURCES})
       SET(PA_PUBLIC_INCLUDES ${PA_PUBLIC_INCLUDES} include/pa_linux_alsa.h)
       SET(PA_SOURCES ${PA_SOURCES} ${PA_ALSA_SOURCES})

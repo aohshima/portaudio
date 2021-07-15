@@ -206,9 +206,15 @@ PaError PaSkeleton_Initialize( PaUtilHostApiRepresentation **hostApi, PaHostApiI
         }
     }
 
+    (*hostApi)->ScanDeviceInfos = NULL;
+    (*hostApi)->CommitDeviceInfos = NULL;
+    (*hostApi)->DisposeDeviceInfos = NULL;
     (*hostApi)->Terminate = Terminate;
     (*hostApi)->OpenStream = OpenStream;
     (*hostApi)->IsFormatSupported = IsFormatSupported;
+    (*hostApi)->ScanDeviceInfos = NULL;
+    (*hostApi)->CommitDeviceInfos = NULL;
+    (*hostApi)->DisposeDeviceInfos = NULL;
 
     PaUtil_InitializeStreamInterface( &skeletonHostApi->callbackStreamInterface, CloseStream, StartStream,
                                       StopStream, AbortStream, IsStreamStopped, IsStreamActive,

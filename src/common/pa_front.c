@@ -109,6 +109,9 @@
 #define PA_VERSION_STRING_ PA_STRINGIZE(paVersionMajor) "." PA_STRINGIZE(paVersionMinor) "." PA_STRINGIZE(paVersionSubMinor)
 #define PA_VERSION_TEXT_   "PortAudio V" PA_VERSION_STRING_ "-devel, revision " PA_STRINGIZE(PA_GIT_REVISION)
 
+extern void PaUtil_InitializeHotPlug();
+extern void PaUtil_TerminateHotPlug();
+
 int Pa_GetVersion( void )
 {
     return paVersion;
@@ -157,6 +160,10 @@ static int initializationCount_ = 0;
 static int deviceCount_ = 0;
 
 PaUtilStreamRepresentation *firstOpenStream_ = NULL;
+
+
+PaDevicesChangedCallback* devicesChangedCallback_ = NULL;
+void* devicesChangedCallbackUserData_ = NULL;
 
 
 #define PA_IS_INITIALISED_ (initializationCount_ != 0)
@@ -368,6 +375,9 @@ PaError Pa_Initialize( void )
         PaUtil_InitializeClock();
         PaUtil_ResetTraceMessages();
 
+        /* Initialize hot plug here, so all its internal info is setup */
+        PaUtil_InitializeHotPlug();
+
         result = InitializeHostApis();
         if( result == paNoError )
             ++initializationCount_;
@@ -393,6 +403,8 @@ PaError Pa_Terminate( void )
             CloseOpenStreams();
 
             TerminateHostApis();
+
+            PaUtil_TerminateHotPlug();
 
             PaUtil_DumpTraceMessages();
         }
@@ -742,6 +754,116 @@ PaDeviceIndex Pa_GetDefaultOutputDevice( void )
     return result;
 }
 
+
+PaError Pa_UpdateAvailableDeviceList( void )
+{
+    PaError result     = paNoError;
+    void **scanResults = NULL;
+    int  *deviceCounts = NULL;
+    int i = 0;
+
+    PA_LOGAPI_ENTER( "Pa_UpdateAvailableDeviceList" );
+    if( !PA_IS_INITIALISED_ )
+    {
+        result = paNotInitialized;
+        goto done;
+    }
+
+    /* Allocate data structures used in 2-stage commit */
+    scanResults = (void **) PaUtil_AllocateMemory( sizeof(void*) * hostApisCount_ );
+    if( !scanResults )
+    {
+        result = paInsufficientMemory;
+        goto done;
+    }
+
+    deviceCounts = ( int * ) PaUtil_AllocateMemory( sizeof( int ) * hostApisCount_ );
+    if( !deviceCounts )
+    {
+        result = paInsufficientMemory;
+        goto done;
+    }
+
+    /* Phase 1: Perform a scan of new devices */
+    for( i = 0 ; i < hostApisCount_ ; ++i )
+    {
+        PaUtilHostApiRepresentation *hostApi = hostApis_[i];
+        PA_DEBUG(( "Scanning new device list for host api %d.\n",i));
+        if( hostApi->ScanDeviceInfos == NULL )
+            continue;
+
+        if( hostApi->ScanDeviceInfos( hostApi, i, &scanResults[ i ], &deviceCounts[ i ] ) != paNoError )
+            break;
+    }
+
+    /* Check the result of the scan operation */
+    if( i < hostApisCount_ )
+    {
+        /* If failure, rollback the scan changes back to original state */
+        int j = 0;
+        for( j = 0 ; j < i ; ++j )
+        {
+            PaUtilHostApiRepresentation *hostApi = hostApis_[j];
+            if( hostApi->DisposeDeviceInfos == NULL )
+                continue;
+
+            PA_DEBUG(( "Performing rollback for device list scan for host api %d.\n",i));
+            hostApi->DisposeDeviceInfos( hostApi, scanResults[ j ], deviceCounts[ j ] );
+        }
+    }
+    else
+    {
+        int baseDeviceIndex = 0;
+        deviceCount_ = 0;
+
+        /* Otherwise, commit the scan changes to each back-end */
+        for( i = 0 ; i < hostApisCount_ ; ++i )
+        {
+            PaUtilHostApiRepresentation *hostApi = hostApis_[i];
+            if( hostApi->CommitDeviceInfos == NULL )
+            {
+                /* Not yet implemented for this backend. Just
+                   assume that the baseDeviceIndex and the paInternalInfo_.deviceCount_ are
+                   incremented according to the values in the info */
+                baseDeviceIndex += hostApi->info.deviceCount;
+                deviceCount_ += hostApi->info.deviceCount;
+                continue;
+            }
+
+            PA_DEBUG(( "Committing device list scan for host api %d.\n",i));
+            if( hostApi->CommitDeviceInfos( hostApi, i, scanResults[ i ], deviceCounts[ i ] ) != paNoError )
+            {
+                PA_DEBUG(( "Committing failed (shouldn't happen) %d.\n",i));
+                result = paInternalError;
+                goto done;
+            }
+
+            assert( hostApi->info.defaultInputDevice < hostApi->info.deviceCount );
+            assert( hostApi->info.defaultOutputDevice < hostApi->info.deviceCount );
+
+            hostApi->privatePaFrontInfo.baseDeviceIndex = baseDeviceIndex;
+
+            if( hostApi->info.defaultInputDevice != paNoDevice )
+                hostApi->info.defaultInputDevice += baseDeviceIndex;
+
+            if( hostApi->info.defaultOutputDevice != paNoDevice )
+                hostApi->info.defaultOutputDevice += baseDeviceIndex;
+
+            baseDeviceIndex += hostApi->info.deviceCount;
+            deviceCount_ += hostApi->info.deviceCount;
+        }
+    }
+
+done:
+
+    if( scanResults )
+        PaUtil_FreeMemory( scanResults );
+
+    if( deviceCounts )
+        PaUtil_FreeMemory( deviceCounts );
+
+    return result;
+}
 
 const PaDeviceInfo* Pa_GetDeviceInfo( PaDeviceIndex device )
 {
@@ -1804,4 +1926,30 @@ PaError Pa_GetSampleSize( PaSampleFormat format )
     PA_LOGAPI_EXIT_PAERROR_OR_T_RESULT( "Pa_GetSampleSize", "int: %d", result );
 
     return (PaError) result;
+}
+
+extern void PaUtil_LockHotPlug();
+extern void PaUtil_UnlockHotPlug();
+
+
+PaError Pa_SetDevicesChangedCallback( void *userData, PaStreamFinishedCallback* devicesChangedCallback )
+{
+    PaUtil_LockHotPlug();
+    devicesChangedCallback_ = devicesChangedCallback;
+    devicesChangedCallbackUserData_ = userData;
+    PaUtil_UnlockHotPlug();
+    return paNoError;
+}
+
+/* Called whenever a OS audio device change has been detected */
+void PaUtil_DevicesChanged(unsigned state, void* pData)
+{
+    (void)state;
+    (void)pData;
+    PaUtil_LockHotPlug();
+    if (devicesChangedCallback_)
+    {
+        (devicesChangedCallback_)(devicesChangedCallbackUserData_);
+    }
+    PaUtil_UnlockHotPlug();
 }

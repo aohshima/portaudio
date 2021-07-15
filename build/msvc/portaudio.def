@@ -36,6 +36,8 @@ Pa_GetStreamWriteAvailable          @32
 Pa_GetSampleSize                    @33
 Pa_Sleep                            @34
 Pa_GetVersionInfo                   @35
+Pa_UpdateAvailableDeviceList        @36
+Pa_SetDevicesChangedCallback        @37
 PaAsio_GetAvailableBufferSizes      @50
 PaAsio_ShowControlPanel             @51
 PaUtil_InitializeX86PlainConverters @52
